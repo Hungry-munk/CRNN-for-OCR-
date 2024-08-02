@@ -4,6 +4,8 @@ class modelConfigs:
     The class is to be used purely for image preprocessing and model training (variable storage) 
     """
     def __init__ (self):
+        self.image_paths = [] #inlcude string file paths for each
+        self.image_type_number = [] #array for containing each thing
         self.augmentation_probability  = 0.3
         self.epoch_num = 200 #TODO change value to something that makes sense
         self.height = 100 #TODO figure out a height that makes sense
