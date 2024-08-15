@@ -6,8 +6,8 @@ class modelConfigs:
     """
     def __init__ (self):
         self.image_paths = [
-            './data/handwritten forms',
-            './data/handwritten lines'
+            '/data/handwritten forms',
+            '/data/handwritten lines'
         ] #inlcude string file paths for each
         self.label_path = "./data/XML Metadata"
         self.augmentation_probability  = 0.3
