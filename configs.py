@@ -6,8 +6,8 @@ class modelConfigs:
     """
     def __init__ (self):
         self.image_paths = [
-            '/data/handwritten forms',
-            '/data/handwritten lines'
+            'data/handwritten forms',
+            'data/handwritten lines'
         ] #inlcude string file paths for each
         self.label_path = "./data/XML Metadata"
         self.augmentation_probability  = 0.3
@@ -17,5 +17,7 @@ class modelConfigs:
         self.batch_size = 1024 #TODO change to something that makes sense
         self.learning_rate = 1e-4 #may not need thanks to ADAM optimzer
 
+        self.form_height = 3542
+        self.form_width = 
         #temp attributes
         self.test_batch_size = 100
