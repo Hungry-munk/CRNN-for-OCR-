@@ -18,6 +18,6 @@ class modelConfigs:
         self.learning_rate = 1e-4 #may not need thanks to ADAM optimzer
 
         self.form_height = 3542
-        self.form_width = 
+        self.form_width = 2479
         #temp attributes
         self.test_batch_size = 100
