@@ -10,10 +10,10 @@ class Configs:
             'data/handwritten lines'
         ] #inlcude string file paths for each
         self.label_path = "./data/XML Metadata"
-        self.augmentation_probability  = 0.4
-        self.data_split = (0.4, 0.6)
+        self.augmentation_probability  = 0.4 
         self.epoch_num = 200 #TODO change value to something that makes sense
         self.image_height = 512 #TODO figure out a height that makes sense
+        self.image_width = 1014
         self.batch_size = 1024 #TODO change to something that makes sense
         self.learning_rate = 1e-4 #may not need thanks to ADAM optimzer
         self.form_height = 3542
@@ -24,6 +24,3 @@ class Configs:
         '0': 53, '1': 54, '2': 55, '3': 56, '4': 57, '5': 58, '6': 59, '7': 60, '8': 61, '9': 62,
         ' ': 63, '.': 64, ',': 65, '!': 66, '?': 67, ':': 68, ';': 69, '-': 70, "'": 71, '"': 72, '(': 73, ')': 74, '#': 75, '*' : 76
         }
-
-        #temp attributes
-        self.test_batch_size = 100

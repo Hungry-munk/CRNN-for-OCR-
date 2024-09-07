@@ -9,12 +9,6 @@ import os
 from html import unescape
 
 def pre_process_image(image, target_height, target_width):
-    # Load image
-    if isinstance(image, str):
-        # If image is a file path, read and decode it
-        image = tf.io.read_file(image)
-        image = tf.image.decode_image(image, channels=1)  # Decode to grayscale
-
     # Resize image
     image_resized = tf.image.resize_with_pad(image, target_height, target_width)
 
@@ -25,7 +19,7 @@ def pre_process_image(image, target_height, target_width):
 
 # a function to seperate the forms imges computer text written parts from the hand written parts
 # important as label would need to be doubled to train both parts and other training complications
-# the name portion is also needs to be removed as their is not training data on the text
+# the name portion on the image is also needs to be removed as their is not training data on the text
 def forms_text_seporator(form_path, HW_bounding_box):
     # read file in based on file path
     image = tf.io.read_file(form_path)
@@ -129,7 +123,7 @@ def form_crop_bouding_box_updater(current_bounding_box, line, line_num, total_li
     return current_bounding_box
 
 # TODO set appropriate defult image heights and width
-def data_preparator(X_image_paths, Y_image_path , data_length = 1000 , image_target_height = 512, image_target_width = 1024, augmentation_probability = 0.35):
+def data_preparator(X_image_paths, Y_image_path , batch_size = 1000 , image_target_height = 512, image_target_width = 1024, augmentation_probability = 0.35):
     # directory containing labels for training data
     label_dir = pl.Path(Y_image_path)
     # get configs
@@ -141,14 +135,14 @@ def data_preparator(X_image_paths, Y_image_path , data_length = 1000 , image_tar
     X = []
     Y = []
     # keep track of the number files are being added to the data batch
-    data_counter = 0
+    batch_length_counter = 0
     # keep track of length of longest sequence
     longest_seq_len = 0
     # data augmentor
     augmentation_model = build_augmentation_model()
 
     for XML_path in label_dir.iterdir():
-        if data_counter >= data_length:
+        if batch_length_counter >= batch_size:
             break
         # get XML root element 
         root = ET.parse(str(XML_path)).getroot()
@@ -194,7 +188,7 @@ def data_preparator(X_image_paths, Y_image_path , data_length = 1000 , image_tar
                 line_image = augmentation_model(line_image)
                 
             X.append(line_image)
-            data_counter += 1
+            batch_length_counter += 1
             
             form_crop_bounding_box = form_crop_bouding_box_updater(
                 form_crop_bounding_box,
@@ -244,7 +238,7 @@ def data_preparator(X_image_paths, Y_image_path , data_length = 1000 , image_tar
         X.append(HW_form_image)
         X.append(CW_form_image)
         
-        data_counter += 2
+        batch_length_counter += 2
     Y_padded = pad_sequences(Y, dtype='int32', padding = 'post', truncating='post') 
 
-    return np.array(X[:data_length]), Y_padded[:data_length]
+    return np.array(X[:batch_size]), Y_padded[:batch_size]
