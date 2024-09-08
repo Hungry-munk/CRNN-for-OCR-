@@ -60,17 +60,13 @@ def random_pad(image, max_padding):
         image = tf.image.decode_image(image, channels=1)
         
     elif isinstance(image, tf.Tensor):
-        # If it's a tensor, ensure it's 3D and uint8
-        if len(tf.shape(image)) == 4:
-            image = tf.squeeze(image, axis=0)  # Remove batch dimension if present
         if image.dtype != tf.uint8:
             image = tf.cast(tf.clip_by_value(image * 255, 0, 255), tf.uint8)
+        if len(image.shape) != 3:
+            raise ValueError('Input type must be a tensor with 3 dimesnsions ')
     else:
         raise ValueError("Input must be a tensor or a file path string")
 
-    # Ensure image is a 3D tensor (height, width, channels)
-    if len(tf.shape(image)) == 2:
-        image = tf.expand_dims(image, -1)
 
     # Generate random padding values
     pad_top = tf.random.uniform([], minval=max_padding // 4, maxval=max_padding, dtype=tf.int32)
