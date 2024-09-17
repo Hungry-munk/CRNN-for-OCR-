@@ -8,14 +8,20 @@ from configs import Configs
 import os
 from html import unescape
 
-def pre_process_image(image, target_height, target_width):
+def pre_process_image(image, target_height):
     # Resize image
-    image_resized = tf.image.resize_with_pad(image, target_height, target_width)
+    h, w, _ = tf.unstack(tf.shape(image))
 
+    aspect_ratio = tf.cast(w, tf.float32) / tf.cast(h, tf.float32)
+    new_width = tf.cast(target_height * aspect_ratio, tf.int32)
+    image = tf.image.resize(image, [target_height, new_width])
     # Convert image to float32 and normalize to [0, 1]
-    n_image = tf.image.convert_image_dtype(image_resized, tf.float32)
-
-    return n_image
+    image = tf.cast(image, tf.float32)
+    print('about enter image dtype')
+    image = tf.image.convert_image_dtype(image, tf.float32)
+    print('has enterd image dttype changer')
+    print(tf.shape(image))
+    return image
 
 # a function to seperate the forms imges computer text written parts from the hand written parts
 # important as label would need to be doubled to train both parts and other training complications
@@ -119,7 +125,7 @@ def form_crop_bouding_box_updater(current_bounding_box, line, line_num, total_li
     return current_bounding_box
 
 # TODO set appropriate defult image heights and width
-def data_preparator(X_image_paths, Y_image_path , batch_size = 1000 , image_target_height = 512, image_target_width = 1024, augmentation_probability = 0.35):
+def data_preparator(X_image_paths, Y_image_path , batch_size = 1000 , image_target_height = 512, augmentation_probability = 0.35):
     # directory containing labels for training data
     label_dir = pl.Path(Y_image_path)
     # get configs
@@ -178,11 +184,11 @@ def data_preparator(X_image_paths, Y_image_path , batch_size = 1000 , image_targ
             full_line_image_path = f'{lines_path}/{subf_name}/{subf_path}/{image_subf_path}.png'
             #process the image 
             line_image = random_pad(full_line_image_path, line_pad_val_gen())
-            line_image = pre_process_image(line_image, image_target_height, image_target_width)
             # randomly with a chosen probability augment
             if np.random.rand() < augmentation_probability:
                 line_image = augmentation_model(line_image)
-                
+            # preprocess image to append into X
+            line_image = pre_process_image(line_image, image_target_height)
             X.append(line_image)
             batch_length_counter += 1
             
@@ -223,18 +229,18 @@ def data_preparator(X_image_paths, Y_image_path , batch_size = 1000 , image_targ
         CW_form_image = random_pad(CW_cropped_form_image, form_pad_val_gen())
         HW_form_image = random_pad(HW_cropped_form_image, form_pad_val_gen())
 
-        CW_form_image = pre_process_image(CW_form_image, image_target_height, image_target_width)
-        HW_form_image = pre_process_image(HW_form_image, image_target_height, image_target_width)
-
         if np.random.rand() <= augmentation_probability:
             CW_form_image = augmentation_model(CW_form_image)
         if np.random.rand() <= augmentation_probability:
             HW_form_image = augmentation_model(HW_form_image)
-            
+
+        CW_form_image = pre_process_image(CW_form_image, image_target_height)
+        HW_form_image = pre_process_image(HW_form_image, image_target_height)
+
         X.append(HW_form_image)
         X.append(CW_form_image)
         
         batch_length_counter += 2
     Y_padded = pad_sequences(Y, dtype='int32', padding = 'post', truncating='post') 
 
-    return np.array(X[:batch_size]), Y_padded[:batch_size]
+    return X[:batch_size], Y_padded[:batch_size]
