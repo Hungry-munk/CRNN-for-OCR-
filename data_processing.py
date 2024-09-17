@@ -17,10 +17,7 @@ def pre_process_image(image, target_height):
     image = tf.image.resize(image, [target_height, new_width])
     # Convert image to float32 and normalize to [0, 1]
     image = tf.cast(image, tf.float32)
-    print('about enter image dtype')
     image = tf.image.convert_image_dtype(image, tf.float32)
-    print('has enterd image dttype changer')
-    print(tf.shape(image))
     return image
 
 # a function to seperate the forms imges computer text written parts from the hand written parts
