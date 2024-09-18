@@ -135,8 +135,6 @@ def data_preparator(X_image_paths, Y_image_path , batch_size = 1000 , image_targ
     Y = []
     # keep track of the number files are being added to the data batch
     batch_length_counter = 0
-    # keep track of length of longest sequence
-    longest_seq_len = 0
     # data augmentor
     augmentation_model = build_augmentation_model()
 
