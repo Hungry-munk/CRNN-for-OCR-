@@ -13,7 +13,8 @@ class Configs:
         self.augmentation_probability  = 0.4 
         self.epoch_num = 200 #TODO change value to something that makes sense
         self.image_height = 256
-        self.batch_size = 13000 #TODO change to something that makes sense
+        self.data_size = 12500
+        self.batch_size = 32
         self.learning_rate = 1e-4 #may not need thanks to ADAM optimzer
         self.form_height = 3542
         self.form_width = 2479
