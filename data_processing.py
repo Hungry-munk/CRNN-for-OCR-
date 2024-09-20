@@ -121,8 +121,7 @@ def form_crop_bouding_box_updater(current_bounding_box, line, line_num, total_li
                     current_bounding_box[2] = y_val
     return current_bounding_box
 
-# TODO set appropriate defult image heights and width
-def data_preparator(X_image_paths, Y_image_path , batch_size = 1000 , image_target_height = 512, augmentation_probability = 0.35):
+def data_preparator(X_image_paths, Y_image_path , data_size = 1000 , image_target_height = 512, augmentation_probability = 0.35):
     # directory containing labels for training data
     label_dir = pl.Path(Y_image_path)
     # get configs
@@ -139,7 +138,7 @@ def data_preparator(X_image_paths, Y_image_path , batch_size = 1000 , image_targ
     augmentation_model = build_augmentation_model()
 
     for XML_path in label_dir.iterdir():
-        if batch_length_counter >= batch_size:
+        if batch_length_counter >= data_size:
             break
         # get XML root element 
         root = ET.parse(str(XML_path)).getroot()
@@ -236,6 +235,27 @@ def data_preparator(X_image_paths, Y_image_path , batch_size = 1000 , image_targ
         X.append(CW_form_image)
         
         batch_length_counter += 2
-    Y_padded = pad_sequences(Y, dtype='int32', padding = 'post', truncating='post') 
 
-    return X[:batch_size], Y_padded[:batch_size]
+    return X[:data_size], Y[:data_size]
+
+# create function to allow for images of differnt widths
+def batch_generator (X, Y, batch_size):
+    while True:
+        for i in range(0, tf.shape(X)[0], batch_size):
+            batch_images = X[i:i+batch_size]
+            longest_width = max([tf.shape(img)[1] for img in batch_images])
+            padded_batch_images = [tf.pad(img, tf.constant[[0,0], [tf.math.round((tf.shape(img)[1] - longest_width) / 2), tf.math.floor((tf.shape(img)[1] - longest_width) / 2)], [0,0]], constant_values=255) for img in batch_images]
+            padded_labels = pad_sequences(Y[i:i+batch_size], dtype = tf.int32, padding = 'post', value = -1)
+            yield padded_batch_images, padded_labels
+            
+# a function to create tensorflow datasets for proper data management during training
+def create_dataset(X, Y, batch_size):
+    height = Configs().image_height
+    dataset = tf.data.Dataset.from_generator(
+        lambda: batch_generator(X, Y, batch_size),
+        output_signature=(
+            tf.TensorSpec(shape=(height, None, 1), dtype=tf.float32),
+            tf.TensorSpec(shape=(None,), dtype=tf.int32)
+        )
+    )
+    return dataset
