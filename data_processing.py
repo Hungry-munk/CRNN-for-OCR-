@@ -222,40 +222,42 @@ def data_preparator(X_image_paths, Y_image_path , data_size = 1000 , image_targe
         # randomly pad all form image for richer training data
         CW_form_image = random_pad(CW_cropped_form_image, form_pad_val_gen())
         HW_form_image = random_pad(HW_cropped_form_image, form_pad_val_gen())
-
+        # augment images
         if np.random.rand() <= augmentation_probability:
             CW_form_image = augmentation_model(CW_form_image)
         if np.random.rand() <= augmentation_probability:
             HW_form_image = augmentation_model(HW_form_image)
-
+        # preprcoess images
         CW_form_image = pre_process_image(CW_form_image, image_target_height)
         HW_form_image = pre_process_image(HW_form_image, image_target_height)
-
+        # add them to data
         X.append(HW_form_image)
         X.append(CW_form_image)
-        
+        # keep track of data
         batch_length_counter += 2
-
+    # return finall dataset
     return X[:data_size], Y[:data_size]
 
 # create function to allow for images of differnt widths
 def batch_generator (X, Y, batch_size):
     while True:
         for i in range(0, tf.shape(X)[0], batch_size):
-            batch_images = X[i:i+batch_size]
-            longest_width = max([tf.shape(img)[1] for img in batch_images])
-            padded_batch_images = [tf.pad(img, tf.constant[[0,0], [tf.math.round((tf.shape(img)[1] - longest_width) / 2), tf.math.floor((tf.shape(img)[1] - longest_width) / 2)], [0,0]], constant_values=255) for img in batch_images]
+            batch_images = X[i:i+batch_size] #get relevant batch
+            longest_width = max([tf.shape(img)[1] for img in batch_images]) #get the longest sequence 
+            # pad images to the length of the longest image
+            padded_batch_images = [tf.pad(img, tf.constant[[0,0], [tf.math.round((tf.shape(img)[1] - longest_width) / 2), tf.math.floor((tf.shape(img)[1] - longest_width) / 2)], [0,0]], constant_values=255) for img in batch_images] 
             padded_labels = pad_sequences(Y[i:i+batch_size], dtype = tf.int32, padding = 'post', value = -1)
             yield padded_batch_images, padded_labels
-            
+
 # a function to create tensorflow datasets for proper data management during training
 def create_dataset(X, Y, batch_size):
     height = Configs().image_height
+    # create  tensorflow dataset
     dataset = tf.data.Dataset.from_generator(
-        lambda: batch_generator(X, Y, batch_size),
+        lambda: batch_generator(X, Y, batch_size), #mabda function to get data batch
         output_signature=(
-            tf.TensorSpec(shape=(height, None, 1), dtype=tf.float32),
-            tf.TensorSpec(shape=(None,), dtype=tf.int32)
+            tf.TensorSpec(shape=(height, None, 1), dtype=tf.float32), #define image shape
+            tf.TensorSpec(shape=(None,), dtype=tf.int32) # define seqeunce label shape
         )
     )
     return dataset
