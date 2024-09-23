@@ -5,7 +5,6 @@ from tensorflow.keras.utils import pad_sequences
 import pathlib as pl
 import xml.etree.ElementTree as ET
 from configs import Configs 
-import os
 from html import unescape
 
 def pre_process_image(image, target_height):
@@ -120,8 +119,26 @@ def form_crop_bouding_box_updater(current_bounding_box, line, line_num, total_li
                 elif current_bounding_box[2] < y_val:
                     current_bounding_box[2] = y_val
     return current_bounding_box
+#  a function for padding a batch of images and seqeunces to the same sizes repectively
+def same_pad_batch(X, Y):
+     # get the widest image standardize image width 
+        longest_width = max([tf.shape(img)[1] for img in X]) #get the longest sequence 
+        # pad images to the length of the longest image
+        # pad images
+        X_batch = [tf.pad(img, tf.constant[[0,0], 
+                                    [tf.cast(tf.math.round((longest_width - tf.shape(img)[1]) / 2), tf.int32), 
+                                     tf.cast(tf.math.floor((longest_width - tf.shape(img)[1]) / 2), tf.int32)], 
+                                    [0, 0]], constant_values=255) 
+                                    for img in X]
+        # pad labels
+        # returns numpy array
+        Y_batch = pad_sequences(Y, dtype = tf.int32, padding = 'post', value = -1)
+        # return data
+        return np.array(X_batch), Y_batch
 
-def data_preparator(X_image_paths, Y_image_path , data_size = 1000 , image_target_height = 512, augmentation_probability = 0.35):
+def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_height, augmentation_probability, cv_add_data = 0.2):
+    if cv_add_data <= 0 or cv_add_data >= 1:
+        raise ValueError('cv_add_data argument should be a float between 0 and 1')
     # directory containing labels for training data
     label_dir = pl.Path(Y_image_path)
     # get configs
@@ -138,8 +155,6 @@ def data_preparator(X_image_paths, Y_image_path , data_size = 1000 , image_targe
     augmentation_model = build_augmentation_model()
 
     for XML_path in label_dir.iterdir():
-        if batch_length_counter >= data_size:
-            break
         # get XML root element 
         root = ET.parse(str(XML_path)).getroot()
         # a lines in the XML file
@@ -235,29 +250,35 @@ def data_preparator(X_image_paths, Y_image_path , data_size = 1000 , image_targe
         X.append(CW_form_image)
         # keep track of data
         batch_length_counter += 2
-    # return finall dataset
-    return X[:data_size], Y[:data_size]
+    # once their is enough processed data yield the data and prepare the next batch after some final processing
+    cv_data_size = tf.math.ceil(batch_size * cv_add_data)
+    total_batch_size = batch_size + cv_data_size
+    while len(X) >= total_batch_size:
+        # pad batches to consistent size for tensorflow datasets
+        X_train_batch, Y_train_batch = same_pad_batch(X[:batch_size, Y[:batch_size]])
+        X_CV_batch, Y_CV_batch = same_pad_batch(X[batch_size: total_batch_size], Y[batch_size: total_batch_size])
 
-# create function to allow for images of differnt widths
-def batch_generator (X, Y, batch_size):
-    while True:
-        for i in range(0, tf.shape(X)[0], batch_size):
-            batch_images = X[i:i+batch_size] #get relevant batch
-            longest_width = max([tf.shape(img)[1] for img in batch_images]) #get the longest sequence 
-            # pad images to the length of the longest image
-            padded_batch_images = [tf.pad(img, tf.constant[[0,0], [tf.math.round((tf.shape(img)[1] - longest_width) / 2), tf.math.floor((tf.shape(img)[1] - longest_width) / 2)], [0,0]], constant_values=255) for img in batch_images] 
-            padded_labels = pad_sequences(Y[i:i+batch_size], dtype = tf.int32, padding = 'post', value = -1)
-            yield padded_batch_images, padded_labels
+        yield (X_train_batch, Y_train_batch) , (X_CV_batch, Y_CV_batch)
+        # Remove used batch from data
+        X = X[total_batch_size:]
+        Y = Y[total_batch_size:]
 
 # a function to create tensorflow datasets for proper data management during training
-def create_dataset(X, Y, batch_size):
-    height = Configs().image_height
+def create_datasets(X_image_paths, Y_image_path , batch_size , image_target_height, augmentation_probability = 0.35, cv_add_data = 0.2 ):
     # create  tensorflow dataset
     dataset = tf.data.Dataset.from_generator(
-        lambda: batch_generator(X, Y, batch_size), #mabda function to get data batch
+        lambda: batch_generator(X_image_paths, Y_image_path , batch_size , image_target_height, augmentation_probability, cv_add_data), #lambda function to get data batch
+        # train batch signiture
         output_signature=(
-            tf.TensorSpec(shape=(height, None, 1), dtype=tf.float32), #define image shape
-            tf.TensorSpec(shape=(None,), dtype=tf.int32) # define seqeunce label shape
+            (
+                tf.TensorSpec(shape=(image_target_height, None, 1), dtype=tf.float32), #define image shape
+                tf.TensorSpec(shape=(None,), dtype=tf.int32) # define seqeunce label shape
+            ),
+            # CV batch signiture
+            (
+                tf.TensorSpec(shape=(image_target_height, None, 1), dtype=tf.float32), #define image shape
+                tf.TensorSpec(shape=(None,), dtype=tf.int32) # define seqeunce label shape
+            )
         )
     )
     return dataset

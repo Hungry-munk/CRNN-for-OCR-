@@ -13,7 +13,7 @@ class Configs:
         self.augmentation_probability  = 0.4 
         self.epoch_num = 150
         self.image_height = 256
-        self.data_size = 2500
+        self.cv_add_data = 0.075
         self.batch_size = 32
         self.learning_rate = 1e-4 #may not need thanks to ADAM optimzer
         self.form_height = 3542
