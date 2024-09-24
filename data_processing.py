@@ -1,16 +1,19 @@
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import RandomContrast, RandomZoom
+from tensorflow.keras.layers import RandomContrast, RandomZoom, Lambda
 from tensorflow.keras.utils import pad_sequences
 import pathlib as pl
 import xml.etree.ElementTree as ET
 from configs import Configs 
 from html import unescape
+import math
+# get configs
+c = Configs()
 
-def pre_process_image(image, target_height):
+def image_resize_normalize(image, target_height):
     # Resize image
     h, w, _ = tf.unstack(tf.shape(image))
-
+    # calcualte aspect ratio to calcualte appriorpate width
     aspect_ratio = tf.cast(w, tf.float32) / tf.cast(h, tf.float32)
     new_width = tf.cast(target_height * aspect_ratio, tf.int32)
     image = tf.image.resize(image, [target_height, new_width])
@@ -27,9 +30,9 @@ def forms_text_seporator(form_path, HW_bounding_box):
     image = tf.io.read_file(form_path)
     image = tf.io.decode_image(image, channels=1) #decode image to grayscale
     # configs for dimensions
-    configs = Configs()
     # bouding box in the convention [y1, x1, y2, x2]
-    CW_bounding_box = [0, 0, HW_bounding_box[0] , configs.form_width ]
+    CW_bounding_box = [0, 0, HW_bounding_box[0] , c.form_width ]
+
     # crop original form image to just handwritten (hence HW) part using correct bounding box
     HW_cropped_image = tf.image.crop_to_bounding_box(
         image, 
@@ -50,8 +53,9 @@ def forms_text_seporator(form_path, HW_bounding_box):
 
 def build_augmentation_model():
     augmentation_model = tf.keras.Sequential([
-        RandomContrast(factor=0.5),
-        RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='constant', fill_value=1.0)     
+        RandomContrast(factor=0.25),
+        RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='constant', fill_value=1.0)  ,
+        Lambda(lambda image: tf.cast(image, tf.float32))  # Ensure output is float32   
     ])
     return augmentation_model
 
@@ -121,18 +125,30 @@ def form_crop_bouding_box_updater(current_bounding_box, line, line_num, total_li
     return current_bounding_box
 #  a function for padding a batch of images and seqeunces to the same sizes repectively
 def same_pad_batch(X, Y):
-     # get the widest image standardize image width 
-        longest_width = max([tf.shape(img)[1] for img in X]) #get the longest sequence 
-        # pad images to the length of the longest image
-        # pad images
-        X_batch = [tf.pad(img, tf.constant[[0,0], 
-                                    [tf.cast(tf.math.round((longest_width - tf.shape(img)[1]) / 2), tf.int32), 
-                                     tf.cast(tf.math.floor((longest_width - tf.shape(img)[1]) / 2), tf.int32)], 
-                                    [0, 0]], constant_values=255) 
-                                    for img in X]
+     # get the widest image standardize image width
+        widths = [tf.shape(image)[1] for image in X]
+        longest_width = max(widths) #get the longest sequence 
+
+        X_batch = []
+        for image in X:
+            # get left and right padding
+            left_pad = tf.cast(tf.math.round((longest_width - tf.shape(image)[1]) / 2), dtype = tf.int32)
+            right_pad = tf.cast(tf.math.floor((longest_width - tf.shape(image)[1]) / 2), dtype = tf.int32)
+            new_width = left_pad + right_pad + image.shape[1]
+            # correct for right padding if needed 
+            if new_width != longest_width:
+                right_pad += longest_width - new_width
+            # create padding tensor
+            paddings = [[0,0], [left_pad, right_pad], [0,0]]
+            # get RGB constant padding value
+            constant_values = tf.constant(255, dtype=image.dtype )
+            # apply padding
+            image = tf.pad(image, paddings, constant_values=constant_values)
+            X_batch.append(image)
+
         # pad labels
-        # returns numpy array
-        Y_batch = pad_sequences(Y, dtype = tf.int32, padding = 'post', value = -1)
+        # returns numpy array so convert X_batch to numpy array too
+        Y_batch = pad_sequences(Y, padding = 'post', value = c.seq_pad_val)
         # return data
         return np.array(X_batch), Y_batch
 
@@ -142,7 +158,7 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
     # directory containing labels for training data
     label_dir = pl.Path(Y_image_path)
     # get configs
-    configs = Configs()
+    c = Configs()
     # forms and lines paths
     forms_path = X_image_paths[0]
     lines_path = X_image_paths[1]
@@ -178,7 +194,7 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
             line_text = unescape(line_text)
             # create a sequence label int's for current line using mapped chars and line text 
             for char in line_text:
-                sequence.append(configs.char_to_index_map[char])
+                sequence.append(c.char_to_index_map[char])
     
             # append to sequence data as a numpy array with data type of int32
             Y.append(np.array(sequence, dtype=np.int32))
@@ -193,11 +209,11 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
             full_line_image_path = f'{lines_path}/{subf_name}/{subf_path}/{image_subf_path}.png'
             #process the image 
             line_image = random_pad(full_line_image_path, line_pad_val_gen())
-            # randomly with a chosen probability augment
-            if np.random.rand() < augmentation_probability:
-                line_image = augmentation_model(line_image)
             # preprocess image to append into X
-            line_image = pre_process_image(line_image, image_target_height)
+            line_image = image_resize_normalize(line_image, image_target_height)
+            # randomly with a chosen probability augment
+            if np.random.rand() <= augmentation_probability:
+                line_image = augmentation_model(line_image)
             X.append(line_image)
             batch_length_counter += 1
             
@@ -216,10 +232,10 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
         # create a sequence label int's for current line using mapped chars and line text
         # for main text 
         for char in form_full_text:
-            HW_sequence.append(configs.char_to_index_map[char])
+            HW_sequence.append(c.char_to_index_map[char])
 
         for char in CW_extra_text:
-            CW_sequence.append(configs.char_to_index_map[char])
+            CW_sequence.append(c.char_to_index_map[char])
 
         # append to sequence data as a numpy array with data type of int32
         np_sequence = np.array(HW_sequence, dtype=np.int32) 
@@ -237,47 +253,52 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
         # randomly pad all form image for richer training data
         CW_form_image = random_pad(CW_cropped_form_image, form_pad_val_gen())
         HW_form_image = random_pad(HW_cropped_form_image, form_pad_val_gen())
+        # resize and and normalize image
+        CW_form_image = image_resize_normalize(CW_form_image, image_target_height)
+        HW_form_image = image_resize_normalize(HW_form_image, image_target_height)
         # augment images
+        print(CW_form_image.shape)
+        print(HW_form_image.shape)
         if np.random.rand() <= augmentation_probability:
             CW_form_image = augmentation_model(CW_form_image)
         if np.random.rand() <= augmentation_probability:
             HW_form_image = augmentation_model(HW_form_image)
-        # preprcoess images
-        CW_form_image = pre_process_image(CW_form_image, image_target_height)
-        HW_form_image = pre_process_image(HW_form_image, image_target_height)
         # add them to data
         X.append(HW_form_image)
         X.append(CW_form_image)
         # keep track of data
         batch_length_counter += 2
     # once their is enough processed data yield the data and prepare the next batch after some final processing
-    cv_data_size = tf.math.ceil(batch_size * cv_add_data)
-    total_batch_size = batch_size + cv_data_size
-    while len(X) >= total_batch_size:
-        # pad batches to consistent size for tensorflow datasets
-        X_train_batch, Y_train_batch = same_pad_batch(X[:batch_size, Y[:batch_size]])
-        X_CV_batch, Y_CV_batch = same_pad_batch(X[batch_size: total_batch_size], Y[batch_size: total_batch_size])
-
-        yield (X_train_batch, Y_train_batch) , (X_CV_batch, Y_CV_batch)
-        # Remove used batch from data
-        X = X[total_batch_size:]
-        Y = Y[total_batch_size:]
+        cv_data_size = tf.math.ceil(batch_size * cv_add_data)
+        total_batch_size = int(batch_size + cv_data_size)
+        while batch_length_counter >= total_batch_size:
+            # pad batches to consistent size for tensorflow datasets
+            X_train_batch, Y_train_batch = same_pad_batch(X[:batch_size], Y[:batch_size])
+            X_CV_batch, Y_CV_batch = same_pad_batch(X[batch_size: total_batch_size], Y[batch_size: total_batch_size])
+            # yield data
+            yield ((X_train_batch, Y_train_batch) , (X_CV_batch, Y_CV_batch))
+            # Remove used batch from data
+            X = X[total_batch_size:]
+            Y = Y[total_batch_size:]
+            batch_length_counter -= total_batch_size
 
 # a function to create tensorflow datasets for proper data management during training
 def create_datasets(X_image_paths, Y_image_path , batch_size , image_target_height, augmentation_probability = 0.35, cv_add_data = 0.2 ):
+    # calcualte amount of cv data
+    cv_data_size = int(tf.math.ceil(batch_size * cv_add_data))
     # create  tensorflow dataset
     dataset = tf.data.Dataset.from_generator(
         lambda: batch_generator(X_image_paths, Y_image_path , batch_size , image_target_height, augmentation_probability, cv_add_data), #lambda function to get data batch
         # train batch signiture
         output_signature=(
             (
-                tf.TensorSpec(shape=(image_target_height, None, 1), dtype=tf.float32), #define image shape
-                tf.TensorSpec(shape=(None,), dtype=tf.int32) # define seqeunce label shape
+                tf.TensorSpec(shape=(batch_size, image_target_height, None, 1), dtype=tf.float32), #define image shape
+                tf.TensorSpec(shape=(batch_size,None,), dtype=tf.int32) # define seqeunce label shape
             ),
             # CV batch signiture
             (
-                tf.TensorSpec(shape=(image_target_height, None, 1), dtype=tf.float32), #define image shape
-                tf.TensorSpec(shape=(None,), dtype=tf.int32) # define seqeunce label shape
+                tf.TensorSpec(shape=(cv_data_size ,image_target_height, None, 1), dtype=tf.float32), #define image shape
+                tf.TensorSpec(shape=(cv_data_size, None,), dtype=tf.int32) # define seqeunce label shape
             )
         )
     )

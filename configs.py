@@ -11,11 +11,12 @@ class Configs:
         ] #inlcude string file paths for each
         self.label_path = "./data/XML Metadata"
         self.augmentation_probability  = 0.4 
+        self.seq_pad_val = -1
         self.epoch_num = 150
         self.image_height = 256
         self.cv_add_data = 0.075
         self.batch_size = 32
-        self.learning_rate = 1e-4 #may not need thanks to ADAM optimzer
+        self.learning_rate = 1e-4
         self.form_height = 3542
         self.form_width = 2479
         self.char_to_index_map = {
