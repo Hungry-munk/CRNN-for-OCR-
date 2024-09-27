@@ -10,13 +10,45 @@ import math
 # get configs
 c = Configs()
 
-def image_resize_normalize(image, target_height):
+def image_resize_normalize(image, target_height, image_max_width):
     # Resize image
     h, w, _ = tf.unstack(tf.shape(image))
     # calcualte aspect ratio to calcualte appriorpate width
     aspect_ratio = tf.cast(w, tf.float32) / tf.cast(h, tf.float32)
-    new_width = tf.cast(target_height * aspect_ratio, tf.int32)
-    image = tf.image.resize(image, [target_height, new_width])
+    calc_width = tf.cast(target_height * aspect_ratio, tf.int32)
+    if  calc_width > image_max_width:
+        # an algo for calcluating the maximum height and width of the image within the with the maxmum height and width 
+        height = 0 # startin height value
+        while (height <= target_height and height * aspect_ratio <= image_max_width):
+            height += 1
+        #adjust for extra pixel 
+        height -= 1
+        # calcualte new width that 
+        width = tf.cast(height * aspect_ratio, tf.int32)
+        
+    else:
+        width = calc_width
+        height = target_height
+    # resize the iamge to fit into the set dimensions
+    image = tf.image.resize(image, [height, width])
+    # add padding to the image if required
+    if height < target_height:
+        # calcualte remainder height
+        remainder_height = target_height - height
+        # get top and bottom padding
+        top_pad = tf.cast(tf.math.round(remainder_height / 2), dtype=tf.int32)
+        bottom_pad = tf.cast(tf.math.floor(remainder_height / 2), dtype= tf.int32)
+        # get total height and adjust if rounding issues occured
+        calc_height = top_pad + bottom_pad + height
+        if calc_height != target_height:
+            bottom_pad += target_height - (calc_height)
+        paddings = [[top_pad, bottom_pad],[0,0],[0,0]]
+        # get RGB constant values
+        constant_values = tf.constant(255, dtype=image.dtype )
+            # apply padding
+        image = tf.pad(image, paddings, constant_values=constant_values)
+
+
     # Convert image to float32 and normalize to [0, 1]
     image = tf.cast(image, tf.float32)
     image = tf.image.convert_image_dtype(image, tf.float32)
@@ -24,14 +56,16 @@ def image_resize_normalize(image, target_height):
 
 # a function to seperate the forms imges computer text written parts from the hand written parts
 # important as label would need to be doubled to train both parts and other training complications
-# the name portion on the image is also needs to be removed as their is not training data on the text
+# the name portion on the form images is also needs to be removed as their is not training data on the text
 def forms_text_seporator(form_path, HW_bounding_box):
     # read file in based on file path
     image = tf.io.read_file(form_path)
     image = tf.io.decode_image(image, channels=1) #decode image to grayscale
     # configs for dimensions
+    # get the width of the image
+    right_pixel = tf.shape(image)[1] - 1 #subtract 1 as images are counted starting at 0
     # bouding box in the convention [y1, x1, y2, x2]
-    CW_bounding_box = [0, 0, HW_bounding_box[0] , c.form_width ]
+    CW_bounding_box = [0, 0, HW_bounding_box[0] , right_pixel] 
 
     # crop original form image to just handwritten (hence HW) part using correct bounding box
     HW_cropped_image = tf.image.crop_to_bounding_box(
@@ -54,7 +88,7 @@ def forms_text_seporator(form_path, HW_bounding_box):
 def build_augmentation_model():
     augmentation_model = tf.keras.Sequential([
         RandomContrast(factor=0.25),
-        RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='constant', fill_value=1.0)  ,
+        RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='constant', fill_value=255)  ,
         Lambda(lambda image: tf.cast(image, tf.float32))  # Ensure output is float32   
     ])
     return augmentation_model
@@ -134,10 +168,10 @@ def same_pad_batch(X, Y):
             # get left and right padding
             left_pad = tf.cast(tf.math.round((longest_width - tf.shape(image)[1]) / 2), dtype = tf.int32)
             right_pad = tf.cast(tf.math.floor((longest_width - tf.shape(image)[1]) / 2), dtype = tf.int32)
-            new_width = left_pad + right_pad + image.shape[1]
+            calc_width = left_pad + right_pad + image.shape[1]
             # correct for right padding if needed 
-            if new_width != longest_width:
-                right_pad += longest_width - new_width
+            if calc_width != longest_width:
+                right_pad += longest_width - calc_width
             # create padding tensor
             paddings = [[0,0], [left_pad, right_pad], [0,0]]
             # get RGB constant padding value
@@ -152,7 +186,7 @@ def same_pad_batch(X, Y):
         # return data
         return np.array(X_batch), Y_batch
 
-def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_height, augmentation_probability, cv_add_data = 0.2):
+def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_height, image_max_width, augmentation_probability, cv_add_data = 0.2):
     if cv_add_data <= 0 or cv_add_data >= 1:
         raise ValueError('cv_add_data argument should be a float between 0 and 1')
     # directory containing labels for training data
@@ -210,7 +244,7 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
             #process the image 
             line_image = random_pad(full_line_image_path, line_pad_val_gen())
             # preprocess image to append into X
-            line_image = image_resize_normalize(line_image, image_target_height)
+            line_image = image_resize_normalize(line_image, image_target_height, image_max_width)
             # randomly with a chosen probability augment
             if np.random.rand() <= augmentation_probability:
                 line_image = augmentation_model(line_image)
@@ -254,11 +288,9 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
         CW_form_image = random_pad(CW_cropped_form_image, form_pad_val_gen())
         HW_form_image = random_pad(HW_cropped_form_image, form_pad_val_gen())
         # resize and and normalize image
-        CW_form_image = image_resize_normalize(CW_form_image, image_target_height)
-        HW_form_image = image_resize_normalize(HW_form_image, image_target_height)
+        CW_form_image = image_resize_normalize(CW_form_image, image_target_height, image_max_width)
+        HW_form_image = image_resize_normalize(HW_form_image, image_target_height, image_max_width)
         # augment images
-        print(CW_form_image.shape)
-        print(HW_form_image.shape)
         if np.random.rand() <= augmentation_probability:
             CW_form_image = augmentation_model(CW_form_image)
         if np.random.rand() <= augmentation_probability:
@@ -281,14 +313,20 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
             X = X[total_batch_size:]
             Y = Y[total_batch_size:]
             batch_length_counter -= total_batch_size
+    # After finishing all lines, handle remaining samples
+    if len(X) > 0 and len(Y) > 0:
+        X_train_batch, Y_train_batch = same_pad_batch(X[:- cv_data_size], Y[:-cv_data_size])  # Use remaining data to yield one last batch
+        X_CV_batch, Y_CV_batch = same_pad_batch(X[ : -cv_data_size], Y[ : -cv_data_size])
+        yield (X_train_batch, Y_train_batch), (X_CV_batch, Y_CV_batch)  # Or however you want to handle the CV data
+
 
 # a function to create tensorflow datasets for proper data management during training
-def create_datasets(X_image_paths, Y_image_path , batch_size , image_target_height, augmentation_probability = 0.35, cv_add_data = 0.2 ):
+def create_datasets(X_image_paths, Y_image_path , batch_size , image_target_height,image_max_width, augmentation_probability = 0.35, cv_add_data = 0.2 ):
     # calcualte amount of cv data
     cv_data_size = int(tf.math.ceil(batch_size * cv_add_data))
     # create  tensorflow dataset
     dataset = tf.data.Dataset.from_generator(
-        lambda: batch_generator(X_image_paths, Y_image_path , batch_size , image_target_height, augmentation_probability, cv_add_data), #lambda function to get data batch
+        lambda: batch_generator(X_image_paths, Y_image_path , batch_size , image_target_height, image_max_width, augmentation_probability, cv_add_data), #lambda function to get data batch
         # train batch signiture
         output_signature=(
             (
