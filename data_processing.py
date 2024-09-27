@@ -228,8 +228,13 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
             line_text = unescape(line_text)
             # create a sequence label int's for current line using mapped chars and line text 
             for char in line_text:
-                sequence.append(c.char_to_index_map[char])
-    
+                try:
+                    sequence.append(c.char_to_index_map[char])
+                except KeyError:
+                # add new keys if missed for some reason
+                    new_length = len(c.char_to_index_map) + 1
+                    c.char_to_index_map[char] = new_length
+                    print('new char added to dict makes sure to change:', char, "at index:", new_length)
             # append to sequence data as a numpy array with data type of int32
             Y.append(np.array(sequence, dtype=np.int32))
 
@@ -264,12 +269,24 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
         # add the extra text found in CW images
         CW_extra_text = f'Sentence Database {subf_path}'
         # create a sequence label int's for current line using mapped chars and line text
-        # for main text 
+        # for main text
+        
         for char in form_full_text:
-            HW_sequence.append(c.char_to_index_map[char])
-
+            try:
+                HW_sequence.append(c.char_to_index_map[char])
+            except:
+                # add new keys if missed for some reason
+                new_length = len(c.char_to_index_map) + 1
+                c.char_to_index_map[char] = new_length
+                print('new char added to dict makes sure to change:', char, "at index:", new_length)
         for char in CW_extra_text:
-            CW_sequence.append(c.char_to_index_map[char])
+            try:
+                CW_sequence.append(c.char_to_index_map[char])
+            except:
+                # add new keys if missed for some reason
+                new_length = len(c.char_to_index_map) + 1
+                c.char_to_index_map[char] = new_length
+                print('new char added to dict makes sure to change:', char, "at index:", new_length)
 
         # append to sequence data as a numpy array with data type of int32
         np_sequence = np.array(HW_sequence, dtype=np.int32) 
@@ -279,27 +296,30 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
         Y.append(np.concatenate((CW_np_extra_sequence, np_sequence)))
         # form image path
         full_form_image_path = f'{forms_path}/{subf_path}.png'
-        # crop the image in 2 parts and return images contain the HW and CW portions
-        CW_cropped_form_image, HW_cropped_form_image = forms_text_seporator(
-            full_form_image_path, 
-            form_crop_bounding_box
-        )
-        # randomly pad all form image for richer training data
-        CW_form_image = random_pad(CW_cropped_form_image, form_pad_val_gen())
-        HW_form_image = random_pad(HW_cropped_form_image, form_pad_val_gen())
-        # resize and and normalize image
-        CW_form_image = image_resize_normalize(CW_form_image, image_target_height, image_max_width)
-        HW_form_image = image_resize_normalize(HW_form_image, image_target_height, image_max_width)
-        # augment images
-        if np.random.rand() <= augmentation_probability:
-            CW_form_image = augmentation_model(CW_form_image)
-        if np.random.rand() <= augmentation_probability:
-            HW_form_image = augmentation_model(HW_form_image)
-        # add them to data
-        X.append(HW_form_image)
-        X.append(CW_form_image)
-        # keep track of data
-        batch_length_counter += 2
+        try:
+            # crop the image in 2 parts and return images contain the HW and CW portions
+            CW_cropped_form_image, HW_cropped_form_image = forms_text_seporator(
+                full_form_image_path, 
+                form_crop_bounding_box
+            )
+            # randomly pad all form image for richer training data
+            CW_form_image = random_pad(CW_cropped_form_image, form_pad_val_gen())
+            HW_form_image = random_pad(HW_cropped_form_image, form_pad_val_gen())
+            # resize and and normalize image
+            CW_form_image = image_resize_normalize(CW_form_image, image_target_height, image_max_width)
+            HW_form_image = image_resize_normalize(HW_form_image, image_target_height, image_max_width)
+            # augment images
+            if np.random.rand() <= augmentation_probability:
+                CW_form_image = augmentation_model(CW_form_image)
+            if np.random.rand() <= augmentation_probability:
+                HW_form_image = augmentation_model(HW_form_image)
+            # add them to data
+            X.append(HW_form_image)
+            X.append(CW_form_image)
+            # keep track of data
+            batch_length_counter += 2
+        except:
+            print('one form image could not be preprocessed and t herfore skipped')
     # once their is enough processed data yield the data and prepare the next batch after some final processing
         cv_data_size = tf.math.ceil(batch_size * cv_add_data)
         total_batch_size = int(batch_size + cv_data_size)
