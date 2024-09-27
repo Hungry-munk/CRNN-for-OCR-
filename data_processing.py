@@ -206,8 +206,17 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
 
     for XML_path in label_dir.iterdir():
         # get XML root element 
-        root = ET.parse(str(XML_path)).getroot()
+        try:
+            root = ET.parse(str(XML_path)).getroot()
+        except ET.ParseError as e:
+            print(f"Error parsing XML file {XML_path}: {e}")
+            print('skipping training example')
+        except Exception as e:
+            print(f"An unexpected error occurred with {XML_path}: {e}")
+            print('skipping training example')
+            continue #skip to next training example 
         # a lines in the XML file
+        
         all_line_ele = root.find('handwritten-part')
         lines = all_line_ele.findall('line')
         # get bounding boxes for handwritten part 
@@ -232,9 +241,9 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
                     sequence.append(c.char_to_index_map[char])
                 except KeyError:
                 # add new keys if missed for some reason
-                    new_length = len(c.char_to_index_map) + 1
+                    new_length = len(c.char_to_index_map)
                     c.char_to_index_map[char] = new_length
-                    print('new char added to dict makes sure to change:', char, "at index:", new_length)
+                    print('\nnew char added to dict makes sure to change:', char, "at index:", new_length)
             # append to sequence data as a numpy array with data type of int32
             Y.append(np.array(sequence, dtype=np.int32))
 
@@ -276,17 +285,17 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
                 HW_sequence.append(c.char_to_index_map[char])
             except:
                 # add new keys if missed for some reason
-                new_length = len(c.char_to_index_map) + 1
+                new_length = len(c.char_to_index_map)
                 c.char_to_index_map[char] = new_length
-                print('new char added to dict makes sure to change:', char, "at index:", new_length)
+                print('\nnew char added to dict makes sure to change:', char, "at index:", new_length)
         for char in CW_extra_text:
             try:
                 CW_sequence.append(c.char_to_index_map[char])
             except:
                 # add new keys if missed for some reason
-                new_length = len(c.char_to_index_map) + 1
+                new_length = len(c.char_to_index_map)
                 c.char_to_index_map[char] = new_length
-                print('new char added to dict makes sure to change:', char, "at index:", new_length)
+                print('\nnew char added to dict makes sure to change:', char, "at index:", new_length)
 
         # append to sequence data as a numpy array with data type of int32
         np_sequence = np.array(HW_sequence, dtype=np.int32) 
@@ -319,7 +328,9 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
             # keep track of data
             batch_length_counter += 2
         except:
-            print('one form image could not be preprocessed and t herfore skipped')
+            print('\n one form image could not be preprocessed and t herfore skipped')
+            print('skipping training example')
+
     # once their is enough processed data yield the data and prepare the next batch after some final processing
         cv_data_size = tf.math.ceil(batch_size * cv_add_data)
         total_batch_size = int(batch_size + cv_data_size)
