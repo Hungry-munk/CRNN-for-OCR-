@@ -209,14 +209,14 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
         try:
             root = ET.parse(str(XML_path)).getroot()
         except ET.ParseError as e:
-            print(f"Error parsing XML file {XML_path}: {e}")
+            print(f"\nError parsing XML file {XML_path}: {e}")
             print('skipping training example')
         except Exception as e:
-            print(f"An unexpected error occurred with {XML_path}: {e}")
+            print(f"\nAn unexpected error occurred with {XML_path}: {e}")
             print('skipping training example')
             continue #skip to next training example 
         # a lines in the XML file
-        
+
         all_line_ele = root.find('handwritten-part')
         lines = all_line_ele.findall('line')
         # get bounding boxes for handwritten part 
@@ -328,7 +328,7 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
             # keep track of data
             batch_length_counter += 2
         except:
-            print('\n one form image could not be preprocessed and t herfore skipped')
+            print('\n one form image could not be preprocessed and therfore skipped')
             print('skipping training example')
 
     # once their is enough processed data yield the data and prepare the next batch after some final processing
@@ -344,11 +344,6 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
             X = X[total_batch_size:]
             Y = Y[total_batch_size:]
             batch_length_counter -= total_batch_size
-    # After finishing all lines, handle remaining samples
-    if len(X) > 0 and len(Y) > 0:
-        X_train_batch, Y_train_batch = same_pad_batch(X[:- cv_data_size], Y[:-cv_data_size])  # Use remaining data to yield one last batch
-        X_CV_batch, Y_CV_batch = same_pad_batch(X[ : -cv_data_size], Y[ : -cv_data_size])
-        yield (X_train_batch, Y_train_batch), (X_CV_batch, Y_CV_batch)  # Or however you want to handle the CV data
 
 
 # a function to create tensorflow datasets for proper data management during training

@@ -82,10 +82,8 @@ def ctc_loss_lambda_func(y_true, y_pred):
         blank_index=0
     )
 
-    # return average loss for the batch
-    mean_loss = tf.reduce_mean(ctc_loss)
-
-    return mean_loss
+    # return average loss for the batch plus epsilion to prevent dividie by 0 errors
+    return tf.reduce_mean(ctc_loss) + c.epsilon
 
 
 # feature map to seqeunce data
@@ -125,8 +123,8 @@ def build_CRNN_model(input_shape, num_classes):
     f_maps = Activation('relu')(f_maps)
     f_maps = MaxPooling2D(pool_size=(1, 2), name='max4')(f_maps)
 
-    # Dropout to help reduce overfitting
-    f_maps = Dropout(0.3)(f_maps)
+    # Dropout to help reduce overfitting if its happening
+    f_maps = Dropout(0.1)(f_maps)
 
     # CNN to RNN transition: convert the feature maps into sequences
     sequence = Lambda(f_map_to_seq)(f_maps)
@@ -135,9 +133,9 @@ def build_CRNN_model(input_shape, num_classes):
     sequence = Dense(256, activation='relu')(sequence)  # Reduce the feature dimensionality
 
     # RNN layers (Bidirectional LSTMs)
-    sequence = Bidirectional(LSTM(256, return_sequences=True, kernel_initializer='glorot_uniform'))(sequence)
-    sequence = Dropout(0.3)(sequence)
-    sequence = Bidirectional(LSTM(256, return_sequences=True, kernel_initializer='glorot_uniform'))(sequence)
+    sequence = Bidirectional(LSTM(512, return_sequences=True, kernel_initializer='glorot_uniform'))(sequence)
+    sequence = Dropout(0.15)(sequence)
+    sequence = Bidirectional(LSTM(512, return_sequences=True, kernel_initializer='glorot_uniform'))(sequence)
 
     # Dense layer with softmax activation for classification
     outputs = Dense(num_classes, activation='softmax')(sequence)
