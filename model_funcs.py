@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Bidirectional, LSTM, Dense, Conv2D, MaxPooling2D, Dropout, Lambda
+from tensorflow.keras.layers import Bidirectional, LSTM, Dense, Conv2D, MaxPooling2D, Dropout, Lambda, Concatenate
 from tensorflow.keras.layers import Input, Activation, BatchNormalization
 from tensorflow.keras.models import load_model, Model
 import tensorflow.keras.backend as K
@@ -59,7 +59,7 @@ def dense_to_sparse(dense_tensor, seq_pad_val=-1):
     return tf.SparseTensor(indices, values, shape)
 
 # CTC loss fucntion
-def ctc_loss_lambda_func(y_true, y_pred):
+def ctc_loss_func(y_true, y_pred):
     batch_size = tf.shape(y_true)[0]
 
     # Compute input length
@@ -71,7 +71,7 @@ def ctc_loss_lambda_func(y_true, y_pred):
     label_length = tf.reduce_sum(tf.cast(tf.not_equal(y_true, seq_pad_val), dtype=tf.int32), axis=1)
     # Convert y_true to sparse tensor for faster operations when calcualtin CTC loss
     sparse_labels = dense_to_sparse(y_true)
-    # retrive the losses for the batch\
+    # retrive the losses for the batch
 
     ctc_loss = tf.nn.ctc_loss(
         labels=sparse_labels, 
@@ -84,7 +84,16 @@ def ctc_loss_lambda_func(y_true, y_pred):
 
     # return average loss for the batch plus epsilion to prevent dividie by 0 errors
     return tf.reduce_mean(ctc_loss) + c.epsilon
-
+# take in a sequence and return the string from the label
+def ctc_decoder(seqeunce):
+    string = ''
+    for index in seqeunce.numpy():
+        try:
+            string += c.index_to_char_map[index]
+        except KeyError as e:
+            continue
+            
+    return string
 
 # feature map to seqeunce data
 def f_map_to_seq(f_map):
@@ -93,49 +102,37 @@ def f_map_to_seq(f_map):
     batch_size, height, width, channels = shape[0], shape[1], shape[2], shape[3]
     
     # Reshape into (batch_size, timesteps, features)
-    sequence = tf.reshape(f_map, (batch_size, width, height * channels))
-    
-    return sequence
+    return tf.reshape(f_map, (batch_size, width, height * channels))
 
-def build_CRNN_model(input_shape, num_classes):
+# function for convelutional bachnorm relu  blocks
+def conv_bn_pool_block(filters, conv_kernel, pool_kernel, conv_padding, block_num, activation, inputs):
+    x = Conv2D(filters, conv_kernel, padding=conv_padding, name=f'conv{block_num}', kernel_initializer='he_normal')(inputs)
+    x = BatchNormalization()(x)
+    x = Activation(activation)(x)
+    x = MaxPooling2D(pool_size=pool_kernel, name=f'max{block_num}')(x)
+    return x
+
+def build_CRNN_model(input_shape, num_classes, activation = 'leaky_relu'):
     inputs = Input(shape=input_shape)
-    # CNN layers
-
-    f_maps = Conv2D(64, (3, 3), padding='same', name='conv1', kernel_initializer='he_normal')(inputs)
-
-    f_maps = BatchNormalization()(f_maps)
-    f_maps = Activation('relu')(f_maps)
-    f_maps = MaxPooling2D(pool_size=(1, 2), name='max1')(f_maps) # maintain vertical information
-
-    f_maps = Conv2D(128, (3, 3), padding='same', name='conv2', kernel_initializer='he_normal')(f_maps)
-
-    f_maps = BatchNormalization()(f_maps)
-    f_maps = Activation('relu')(f_maps)
-    f_maps = MaxPooling2D(pool_size=(1, 2), name='max2')(f_maps)
-
-    f_maps = Conv2D(256, (3, 3), padding='same', name='conv3', kernel_initializer='he_normal')(f_maps)
-    f_maps = BatchNormalization()(f_maps)
-    f_maps = Activation('relu')(f_maps)
-    f_maps = MaxPooling2D(pool_size=(1, 2), name='max3')(f_maps)
-    
-    f_maps = Conv2D(512, (3, 3), padding='same', name='conv4', kernel_initializer='he_normal')(f_maps)
-    f_maps = BatchNormalization()(f_maps)
-    f_maps = Activation('relu')(f_maps)
-    f_maps = MaxPooling2D(pool_size=(1, 2), name='max4')(f_maps)
+    # apply convelutions, batchnorm, activations and pooling 
+    f_maps = conv_bn_pool_block(64,  (5,5), (2,2), 'same', 1, activation, inputs)
+    f_maps = conv_bn_pool_block(128, (4,4), (2,2), 'same', 2, activation, f_maps)
+    f_maps = conv_bn_pool_block(256, (3,3), (1,2), 'same', 3, activation, f_maps)
+    f_maps = conv_bn_pool_block(512, (3,3), (1,2), 'same', 4, activation, f_maps)
 
     # Dropout to help reduce overfitting if its happening
-    f_maps = Dropout(0.1)(f_maps)
+    f_maps = Dropout(0.2)(f_maps)
 
     # CNN to RNN transition: convert the feature maps into sequences
     sequence = Lambda(f_map_to_seq)(f_maps)
 
     # Dimensionality reduction
-    sequence = Dense(256, activation='relu')(sequence)  # Reduce the feature dimensionality
+    sequence = Dense(128, activation=activation)(sequence)  # Reduce the feature dimensionality
 
     # RNN layers (Bidirectional LSTMs)
-    sequence = Bidirectional(LSTM(512, return_sequences=True, kernel_initializer='glorot_uniform'))(sequence)
-    sequence = Dropout(0.15)(sequence)
-    sequence = Bidirectional(LSTM(512, return_sequences=True, kernel_initializer='glorot_uniform'))(sequence)
+    sequence = Bidirectional(LSTM(256, return_sequences=True, kernel_initializer='glorot_uniform'))(sequence)
+    sequence = Dropout(0.2)(sequence)
+    sequence = Bidirectional(LSTM(128, return_sequences=True, kernel_initializer='glorot_uniform'))(sequence)
 
     # Dense layer with softmax activation for classification
     outputs = Dense(num_classes, activation='softmax')(sequence)
@@ -143,3 +140,4 @@ def build_CRNN_model(input_shape, num_classes):
     # Create and return model
     model = Model(inputs=inputs, outputs=outputs)
     return model
+

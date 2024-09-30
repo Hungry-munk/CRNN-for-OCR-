@@ -7,10 +7,11 @@ import xml.etree.ElementTree as ET
 from configs import Configs 
 from html import unescape
 import math
+
 # get configs
 c = Configs()
 
-def image_resize_normalize(image, target_height, image_max_width):
+def image_boundry_resize(image, target_height, image_max_width):
     # Resize image
     h, w, _ = tf.unstack(tf.shape(image))
     # calcualte aspect ratio to calcualte appriorpate width
@@ -24,13 +25,15 @@ def image_resize_normalize(image, target_height, image_max_width):
         #adjust for extra pixel 
         height -= 1
         # calcualte new width that 
-        width = tf.cast(height * aspect_ratio, tf.int32)
-        
+        width = tf.cast(height * aspect_ratio, tf.int32)   
     else:
         width = calc_width
         height = target_height
     # resize the iamge to fit into the set dimensions
     image = tf.image.resize(image, [height, width])
+    # convert dtype batck to uint8 due to implicit dtype conversion from resizing
+    if image.dtype != tf.uint8:
+        image= tf.cast(image, dtype= tf.uint8)
     # add padding to the image if required
     if height < target_height:
         # calcualte remainder height
@@ -47,11 +50,7 @@ def image_resize_normalize(image, target_height, image_max_width):
         constant_values = tf.constant(255, dtype=image.dtype )
             # apply padding
         image = tf.pad(image, paddings, constant_values=constant_values)
-
-
-    # Convert image to float32 and normalize to [0, 1]
-    image = tf.cast(image, tf.float32)
-    image = tf.image.convert_image_dtype(image, tf.float32)
+    
     return image
 
 # a function to seperate the forms imges computer text written parts from the hand written parts
@@ -85,11 +84,19 @@ def forms_text_seporator(form_path, HW_bounding_box):
     )
     return HW_cropped_image, CW_cropped_image
 
+# function for normalizing a batch for training to be yielded 
+def normalize_batch(batch):
+    # normalize batch
+    return tf.vectorized_map(
+        lambda img: tf.cast(img, tf.float32) / 255.0,
+        batch,
+        warn = False
+    )
+# data augmentation model to change up data slightly for variation
 def build_augmentation_model():
     augmentation_model = tf.keras.Sequential([
         RandomContrast(factor=0.25),
-        RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='constant', fill_value=255)  ,
-        Lambda(lambda image: tf.cast(image, tf.float32))  # Ensure output is float32   
+        RandomZoom(height_factor=(-0.1, 0.1), width_factor=(-0.1, 0.1), fill_mode='constant', fill_value=255),  
     ])
     return augmentation_model
 
@@ -99,9 +106,7 @@ def random_pad(image, max_padding):
         image = tf.io.read_file(image)
         image = tf.image.decode_image(image, channels=1)
         
-    elif isinstance(image, tf.Tensor):
-        if image.dtype != tf.uint8:
-            image = tf.cast(tf.clip_by_value(image * 255, 0, 255), tf.uint8)
+    elif isinstance(image, tf.Tensor):    
         if len(image.shape) != 3:
             raise ValueError('Input type must be a tensor with 3 dimesnsions ')
     else:
@@ -160,8 +165,7 @@ def form_crop_bouding_box_updater(current_bounding_box, line, line_num, total_li
 #  a function for padding a batch of images and seqeunces to the same sizes repectively
 def same_pad_batch(X, Y):
      # get the widest image standardize image width
-        widths = [tf.shape(image)[1] for image in X]
-        longest_width = max(widths) #get the longest sequence 
+        longest_width = max([tf.shape(image)[1] for image in X]) #get the longest sequence 
 
         X_batch = []
         for image in X:
@@ -257,11 +261,14 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
             full_line_image_path = f'{lines_path}/{subf_name}/{subf_path}/{image_subf_path}.png'
             #process the image 
             line_image = random_pad(full_line_image_path, line_pad_val_gen())
+
             # preprocess image to append into X
-            line_image = image_resize_normalize(line_image, image_target_height, image_max_width)
+            line_image = image_boundry_resize(line_image, image_target_height, image_max_width)
+
             # randomly with a chosen probability augment
             if np.random.rand() <= augmentation_probability:
                 line_image = augmentation_model(line_image)
+
             X.append(line_image)
             batch_length_counter += 1
             
@@ -273,64 +280,68 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
             )
             line_counter += 1
         
-        HW_sequence = []
-        CW_sequence = []
-        # add the extra text found in CW images
-        CW_extra_text = f'Sentence Database {subf_path}'
-        # create a sequence label int's for current line using mapped chars and line text
-        # for main text
-        
-        for char in form_full_text:
-            try:
-                HW_sequence.append(c.char_to_index_map[char])
-            except:
-                # add new keys if missed for some reason
-                new_length = len(c.char_to_index_map)
-                c.char_to_index_map[char] = new_length
-                print('\nnew char added to dict makes sure to change:', char, "at index:", new_length)
-        for char in CW_extra_text:
-            try:
-                CW_sequence.append(c.char_to_index_map[char])
-            except:
-                # add new keys if missed for some reason
-                new_length = len(c.char_to_index_map)
-                c.char_to_index_map[char] = new_length
-                print('\nnew char added to dict makes sure to change:', char, "at index:", new_length)
-
-        # append to sequence data as a numpy array with data type of int32
-        np_sequence = np.array(HW_sequence, dtype=np.int32) 
-        CW_np_extra_sequence = np.array(CW_sequence, dtype=np.int32)
-        # add sequences to sequence list Y
-        Y.append(np_sequence)
-        Y.append(np.concatenate((CW_np_extra_sequence, np_sequence)))
-        # form image path
-        full_form_image_path = f'{forms_path}/{subf_path}.png'
         try:
+            HW_sequence = []
+            CW_sequence = []
+            # add the extra text found in CW images
+            CW_extra_text = f'Sentence Database {subf_path if len(subf_path) == 7 else subf_path[:7]}'
+            # create a sequence label int's for current line using mapped chars and line text
+            # for main text
+            
+            for char in form_full_text:
+                try:
+                    HW_sequence.append(c.char_to_index_map[char])
+                except:
+                    # add new keys if missed for some reason
+                    new_length = len(c.char_to_index_map)
+                    c.char_to_index_map[char] = new_length
+                    print('\nnew char added to dict makes sure to change:', char, "at index:", new_length)
+            for char in CW_extra_text:
+                try:
+                    CW_sequence.append(c.char_to_index_map[char])
+                except:
+                    # add new keys if missed for some reason
+                    new_length = len(c.char_to_index_map)
+                    c.char_to_index_map[char] = new_length
+                    print('\nnew char added to dict makes sure to change:', char, "at index:", new_length)
+
+            # append to sequence data as a numpy array with data type of int32
+            HW_np_sequence = np.array(HW_sequence, dtype=np.int32) 
+            CW_np_extra_sequence = np.array(CW_sequence, dtype=np.int32)
+            # add sequences to sequence list Y
+            Y.append(np.concatenate((CW_np_extra_sequence, HW_np_sequence)))
+            Y.append(HW_np_sequence)
+            # form image path
+            full_form_image_path = f'{forms_path}/{subf_path}.png'
             # crop the image in 2 parts and return images contain the HW and CW portions
             CW_cropped_form_image, HW_cropped_form_image = forms_text_seporator(
                 full_form_image_path, 
                 form_crop_bounding_box
             )
+
             # randomly pad all form image for richer training data
-            CW_form_image = random_pad(CW_cropped_form_image, form_pad_val_gen())
             HW_form_image = random_pad(HW_cropped_form_image, form_pad_val_gen())
-            # resize and and normalize image
-            CW_form_image = image_resize_normalize(CW_form_image, image_target_height, image_max_width)
-            HW_form_image = image_resize_normalize(HW_form_image, image_target_height, image_max_width)
+            CW_form_image = random_pad(CW_cropped_form_image, form_pad_val_gen())
+
+            # resize images
+            HW_form_image = image_boundry_resize(HW_form_image, image_target_height, image_max_width)
+            CW_form_image = image_boundry_resize(CW_form_image, image_target_height, image_max_width)
             # augment images
             if np.random.rand() <= augmentation_probability:
-                CW_form_image = augmentation_model(CW_form_image)
-            if np.random.rand() <= augmentation_probability:
                 HW_form_image = augmentation_model(HW_form_image)
+            if np.random.rand() <= augmentation_probability:
+                CW_form_image = augmentation_model(CW_form_image)
+
             # add them to data
             X.append(HW_form_image)
             X.append(CW_form_image)
             # keep track of data
             batch_length_counter += 2
-        except:
+        except Exception as e:
+            print(e)
             print('\n one form image could not be preprocessed and therfore skipped')
             print('skipping training example')
-
+            
     # once their is enough processed data yield the data and prepare the next batch after some final processing
         cv_data_size = tf.math.ceil(batch_size * cv_add_data)
         total_batch_size = int(batch_size + cv_data_size)
@@ -338,6 +349,9 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
             # pad batches to consistent size for tensorflow datasets
             X_train_batch, Y_train_batch = same_pad_batch(X[:batch_size], Y[:batch_size])
             X_CV_batch, Y_CV_batch = same_pad_batch(X[batch_size: total_batch_size], Y[batch_size: total_batch_size])
+            # normalize image batches to [0,1]
+            X_train_batch = normalize_batch(X_train_batch)
+            X_CV_batch = normalize_batch(X_CV_batch)
             # yield data
             yield ((X_train_batch, Y_train_batch) , (X_CV_batch, Y_CV_batch))
             # Remove used batch from data
