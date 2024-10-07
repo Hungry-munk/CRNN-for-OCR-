@@ -215,6 +215,7 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
         except ET.ParseError as e:
             print(f"\nError parsing XML file {XML_path}: {e}")
             print('skipping training example')
+            continue
         except Exception as e:
             print(f"\nAn unexpected error occurred with {XML_path}: {e}")
             print('skipping training example')
@@ -279,7 +280,9 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
                 line_nums
             )
             line_counter += 1
-        
+        '''
+        # comment form hendeling images to remove them from dataset
+          
         try:
             HW_sequence = []
             CW_sequence = []
@@ -341,6 +344,7 @@ def batch_generator(X_image_paths, Y_image_path , batch_size , image_target_heig
             print(e)
             print('\n one form image could not be preprocessed and therfore skipped')
             print('skipping training example')
+            '''
             
     # once their is enough processed data yield the data and prepare the next batch after some final processing
         cv_data_size = tf.math.ceil(batch_size * cv_add_data)
